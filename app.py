@@ -4,13 +4,62 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
 import datetime
 from functools import wraps
+from sqlalchemy import or_
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+
+# Note the Limiter is for the whole app so for any routes combined with the ip address it will block after that. like 200 per day is the limit.
 
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-app.config['SECRET_KEY'] = 'this_is_the_secret'
+# The secret key that I am using is 18 characters but it needs 32 characters min to be unhackable as per maths calculation. HS256
+app.config['SECRET_KEY'] = 'this_is_the_secret_this_is_the_secret'
 
+# Intialization of the ORM
 db = SQLAlchemy(app)
+
+def token_required(f):
+    # Need to learn why wraps
+    # We need to use wrap as it copies the original functions data to this function makes it seem that this is the original function
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if not token:
+            return jsonify({"message": "Token is missing!"}), 401
+        token = token.split()[1]
+
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
+
+            if data.get('type') == 'refresh':
+                raise jwt.InvalidTokenError("Refresh tokens cannot be used to access data!!")
+            user = User.query.filter_by(id=data.get('user_id')).first()
+
+        except jwt.ExpiredSignatureError:
+            return jsonify({"message": "Token is Expired!"}), 401
+            # Here we need to try to do the refresh token logic. we can do this later though
+        except jwt.InvalidTokenError:
+            return jsonify({"message": "Token is Invalid!"}), 401
+        
+        return f(user, *args, **kwargs)
+    return decorated
+
+
+@token_required
+def get_user_id_or_ip(current_user):
+    if current_user:
+        return str(current_user.id)
+    return get_remote_address()
+
+# Initialization of Limiter
+limiter = Limiter(
+    key_func=get_user_id_or_ip,
+    app = app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="moving-window"
+)
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key = True)
@@ -37,6 +86,7 @@ with app.app_context():
     db.create_all()
 
 @app.route('/register', methods=['Post'])
+@limiter.limit("5 per minute")
 def register_user():
     data = request.get_json()
     username = data.get('username')
@@ -56,9 +106,13 @@ def register_user():
     db.session.add(user)
     db.session.commit()
 
-    return redirect(url_for('login_user'))
+    return jsonify({
+        "message": "User successfully Registered. Please login"
+    }), 201
+
 
 @app.route('/login', methods=["Post"])
+@limiter.limit("5 per minute")
 def login_user():
     data = request.get_json()
     username = data.get('username')
@@ -70,36 +124,70 @@ def login_user():
         return jsonify({"data":f"No username with {username} found"}), 401 
 
     if check_password_hash(user.password_hash, password=password):
-        token = jwt.encode({
+        payload = {
             'user_id': user.id,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-        }, app.config['SECRET_KEY'], algorithm="HS256")
-        return jsonify({"token":token}), 200
+            'type':'access',
+            'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=15)
+        }
+        access_token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm="HS256")
+
+        payload = {
+            'user_id': user.id,
+            'type':'refresh',
+            'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=7)
+        }
+        refresh_token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm="HS256")
+        return jsonify({
+            "access_token":access_token,
+            "refresh_token": refresh_token
+        }), 200
     else:
         return jsonify({"data":f"Wrong Password"}), 401
 
-def token_required(f):
-    # Need to learn why wraps
-    # We need to use wrap as it copies the original functions data to this function makes it seem that this is the original function
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({"message": "Token is missing!"}), 401
-        token = token.split()[1]
+@app.route('/refresh', methods=['POST'])
+@limiter.limit("5 per 1 minute")
+def refresh_token():
+    token = request.headers.get('Authorization')
+
+    if token:
+        token = token.replace('Bearer ', '')
 
         try:
+
             data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=["HS256"])
-            user = User.query.filter_by(id=data.get('user_id')).first()
+
+            if data.get('type') == 'access':
+                raise jwt.InvalidTokenError("Need Refresh token to provie new token")
+            
+            payload = {
+                'user_id': data.get('user_id'),
+                'type':'access',
+                'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=15)
+            }
+            access_token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm="HS256")
+
+            payload = {
+                'user_id': data.get('user_id'),
+                'type':'refresh',
+                'exp': datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=7)
+            }
+            refresh_token = jwt.encode(payload, app.config['SECRET_KEY'], algorithm="HS256")
+            return jsonify({
+                "access_token":access_token,
+                "refresh_token": refresh_token
+            }), 200
+
 
         except jwt.ExpiredSignatureError:
             return jsonify({"message": "Token is Expired!"}), 401
-            # Here we need to try to do the refresh token logic. we can do this later though
         except jwt.InvalidTokenError:
-            return jsonify({"message": "Token is Invalid!"}), 401
+            return jsonify({"message": "Token is Invalid!"}), 401 
         
-        return f(user, *args, **kwargs)
-    return decorated
+    else:
+        return jsonify({
+            "message": "Please provide the token"
+        }), 400
+
         
 
 @app.route('/todos', methods=['Post'])
@@ -138,8 +226,46 @@ def get_todos(current_user):
 
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 10, type=int)
+    status = request.args.get('status', None)
+    sort_by = request.args.get('sort_by', None)
+    order = request.args.get('order', 'asc')
+    search = request.args.get('search', None)
 
-    todos = Todo.query.filter_by(user_id=current_user.id).paginate(page=page, per_page=limit, error_out=False)
+    query = Todo.query.filter_by(user_id=current_user.id)
+
+    if status:
+        query = query.filter_by(status=status)
+    
+    valid_sort_columns = {
+        'title': Todo.title,
+        'status': Todo.status,
+        'id': Todo.id
+    }
+
+    if sort_by:
+        column = ""
+        if sort_by in valid_sort_columns:
+            column = valid_sort_columns[sort_by]
+        
+            if order:
+                if order == 'asc':
+                    query = query.order_by(column.asc())
+                else:
+                    query = query.order_by(column.desc())
+        else:
+            query = query.order_by(column)
+
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            or_(
+                Todo.title.ilike(search_term),
+                Todo.description.ilike(search_term)
+            )
+        )
+
+
+    todos = query.paginate(page=page, per_page=limit, error_out=False)
     # print(todos)
     # print(dir(todos))
     # print(todos.first)
@@ -243,6 +369,37 @@ def delete_todo(current_user, id):
 
     return '', 204
         
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        "error":"ratelimit_exceeded",
+        "message": f'Whoa there! You have exceeded your rate limit. {e.description}'
+    }), 429
+
+@app.errorhandler(404)
+def data_not_found(e):
+    return jsonify({
+        "error":"Data not found",
+        "message": f'Whoa there! The requested data is unavailable or deleted'
+    }), 404
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({
+        "error":"Method not allowed",
+        "message": f'Whoa there! The requested method is unavailable currently'
+    }), 405
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    # In production, you would also log the actual error to a file here!
+    return jsonify({"error": "Internal server error", "message": "Something went wrong on our end."}), 500
+
+@app.errorhandler(400)
+def bad_request(e):
+    # In production, you would also log the actual error to a file here!
+    return jsonify({"error": "Bad Request", "message": "Bad Request"}), 400
 
 if __name__ == "__main__":
     app.run(debug=True)
