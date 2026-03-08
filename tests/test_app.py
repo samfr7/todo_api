@@ -1,22 +1,25 @@
 import unittest
-from app import app, db
+from app import create_app
+from app.extensions import db
 
 class TodoAPITestCase(unittest.TestCase):
     # setUp() runs automatically BEFORE every single test
     def setUp(self):
-        app.config['TESTING'] = True
+        self.app = create_app()
+
+        self.app.config['TESTING'] = True
 
         # this is very important step. You are creating a db in the RAM
-        app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+        self.app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
 
-        self.client = app.test_client()
+        self.client = self.app.test_client()
 
-        with app.app_context():
+        with self.app.app_context():
             db.create_all()
 
     
     def tearDown(self):
-        with app.app_context():
+        with self.app.app_context():
             db.session.remove()
             db.drop_all()
             db.engine.dispose()
@@ -47,11 +50,16 @@ class TodoAPITestCase(unittest.TestCase):
         self.client.post('/register', json=mock_data)
         response = self.client.post('/login', json=mock_data)
         access_token = response.get_json().get('access_token')
-
-        response = self.client.get('/todos', headers={
-            'Authorization' : f'Bearer {access_token}'
-        })
-
+        response = self.client.get(
+            '/todos', 
+            headers={
+                'Authorization' : f'Bearer {access_token}'
+            },
+            json={
+                'title':'This is the first task',
+                'description':'This is the description'
+            }
+        )
         data = response.get_json()
 
         self.assertIn('data',data.keys())
