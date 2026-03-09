@@ -28,4 +28,4 @@ jobs:
 
     - name: Deploy to Render
       if: success()
-      run: curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
+      run: curl -f -v "${{ secrets.RENDER_DEPLOY_HOOK }}"
