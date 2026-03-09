@@ -29,6 +29,8 @@ def create_todo(current_user):
 
         db.session.add(todo)
         db.session.commit()
+
+        # After there is a commit, we have to ensure that we fetch the data again so that id appears
     except Exception as e:
         db.session.rollback()
         return jsonify({"message":"Internal Server Issue! Please try again later"}), 500

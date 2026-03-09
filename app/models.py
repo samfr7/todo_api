@@ -11,7 +11,7 @@ class Todo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(500))
-
+    created_at = db.Column(db.DateTime, server_default=db.func.now(), nullable=False)
     status = db.Column(
         db.Enum('open','in progress', 'completed', name='status_types'),
         default = 'open',

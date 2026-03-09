@@ -1,5 +1,5 @@
 from flask import Flask
-from .extensions import db, limiter
+from .extensions import db, limiter, cors, migrate
 from .routes.auth_routes import auth_bp
 from .routes.todo_routes import todo_bp
 from .utils import register_error_handlers
@@ -18,6 +18,8 @@ def create_app():
     # 2. Initialize Extensions with the app
     db.init_app(app=app)
     limiter.init_app(app=app)
+    cors.init_app(app=app)
+    migrate.init_app(app=app, db=db)
 
     # 3. Register Blueprints
     app.register_blueprint(auth_bp)
@@ -26,8 +28,8 @@ def create_app():
     # 4. Register error handlers
     register_error_handlers(app)
 
-    with app.app_context():
-        db.create_all()
+    # with app.app_context():
+    #     db.create_all()
 
     return app
 

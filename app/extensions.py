@@ -3,6 +3,8 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask import request, current_app
 import jwt
+from flask_cors import CORS
+from flask_migrate import Migrate
 
 
 
@@ -36,3 +38,7 @@ limiter = Limiter(
     storage_uri="memory://",
     strategy="moving-window"
 )
+
+cors = CORS()
+
+migrate = Migrate() 
