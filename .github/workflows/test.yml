@@ -25,3 +25,7 @@ jobs:
     - name: Run the automated tests
       run: |
         python -m unittest tests/test_app.py
+
+    - name: Deploy to Render
+      if: success()
+      run: curl "${{ secrets.RENDER_DEPLOY_HOOK }}"
