@@ -5,7 +5,11 @@ from app.extensions import db
 class TodoAPITestCase(unittest.TestCase):
     # setUp() runs automatically BEFORE every single test
     def setUp(self):
-        self.app = create_app()
+        self.app = create_app({
+            'TESTING': True,
+            'SQLALCHEMY_DATABASE_URI': 'sqlite:///:memory:',
+            'SECRET_KEY': 'test-secret-key-secret-secret-secret-secret-secret-secret'
+        })
 
         self.app.config['TESTING'] = True
 

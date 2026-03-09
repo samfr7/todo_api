@@ -8,12 +8,15 @@ import os
 
 load_dotenv()
 
-def create_app():
+def create_app(test_config=None):
     app = Flask(__name__)
 
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI')
-    # The secret key that I am using is 18 characters but it needs 32 characters min to be unhackable as per maths calculation. HS256
-    app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+    if test_config is None:
+        app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URI')
+        # The secret key that I am using is 18 characters but it needs 32 characters min to be unhackable as per maths calculation. HS256
+        app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+    else:
+        app.config.update(test_config)
 
     # 2. Initialize Extensions with the app
     db.init_app(app=app)
